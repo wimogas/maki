@@ -1,4 +1,5 @@
 import os
+from openai import OpenAI
 
 
 def _load_env_file():
@@ -48,5 +49,96 @@ def _load_env_file():
             os.environ[key] = value
 
 
+class Source:
+    def __init__(self, name, base_url, model=None):
+        self.name = name
+        self.base_url = base_url
+        self.api_key = "noop"
+        self.model = model
+        self.client = OpenAI(base_url=base_url, api_key=self.api_key)
+
+
+    def get_model(self):
+        return self.model
+
+
+def _init_source():
+    """Build one Source (name, base_url, api_key, model, OpenAI client) from env vars."""
+    global client, MODEL, ACTIVE
+    
+    # Build source from env vars
+    base_url = os.environ.get("MAKI_BASE_URL", "http://localhost:8080/v1")
+    model = os.environ.get("MAKI_MODEL")
+    
+    # Create the source
+    src = Source("local", base_url, model)
+    
+    # Set globals
+    client = src.client
+    MODEL = src.get_model()
+    ACTIVE = src
+    
+    return src
+
+
+def _banner():
+    """Display startup banner with model name."""
+    print(f"maki - {MODEL}")
+
+
+SYSTEM = """You are a terminal coding agent."""
+
+
+def open_stream(msg):
+    """Open streaming connection to the single LLM endpoint.
+    Returns (stream_iterator, usage_dict) for consumption by model_turn.
+    """
+    global client, MODEL
+    
+    stream = client.chat.completions.create(
+        model=MODEL,
+        messages=msg,
+        stream=True,
+        temperature=0.7
+    )
+    
+    return stream, {"total_cost": 0}
+
+
+def model_turn(system_prompt):
+    """Core turn execution with streaming.
+    Sends the system prompt to the model and streams back the response.
+    """
+    global messages
+    
+    messages = [{"role": "system", "content": system_prompt},
+                {"role": "user", "content": "Who are you?"}]
+
+    stream, usage = open_stream(messages)
+    
+    response_text = ""
+    for chunk in stream:
+        if chunk.choices:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                response_text += delta.content
+                print(delta.content, end="", flush=True)
+    
+    print()  # Newline after streaming
+    
+    messages.append({"role": "assistant", "content": response_text})
+    
+    return response_text
+
+
 # Load the environment file at startup
 _load_env_file()
+
+# Initialize the source
+source = _init_source()
+
+# Display banner
+_banner()
+
+# Test 1 assistant response
+model_turn(SYSTEM)
