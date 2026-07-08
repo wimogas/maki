@@ -1,3 +1,4 @@
+import json
 import os
 from openai import OpenAI
 
@@ -86,18 +87,53 @@ def _banner():
     print(f"maki - {MODEL}")
 
 
+def list_dir(path):
+    """Return sorted directory listing."""
+    try:
+        entries = sorted(os.listdir(path))
+        return entries
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
 SYSTEM = """You are a terminal coding agent."""
 
 
-def open_stream(msg):
+DISPATCH = {
+    "list_dir": list_dir
+}
+
+
+TOOLS = [
+    {"type": "function", "function": {"name": "list_dir", "description": "List a directory","parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+]
+
+
+def run_tool(name, args):
+    fn = DISPATCH.get(name)
+
+    if not fn:
+        return f"ERROR: unknown tool {name}"
+
+    try:
+        result = fn(**args)
+    except Exception as e:
+        result = f"ERROR: {type(e).__name__}: {e}"
+
+    print(result)
+
+    return result
+
+def open_stream(msg, tools=TOOLS):
     """Open streaming connection to the single LLM endpoint.
     Returns (stream_iterator, usage_dict) for consumption by model_turn.
     """
     global client, MODEL
-    
+
     stream = client.chat.completions.create(
         model=MODEL,
         messages=msg,
+        tools=tools,
         stream=True,
         temperature=0.7
     )
@@ -110,25 +146,59 @@ def model_turn(system_prompt):
     Sends the system prompt to the model and streams back the response.
     """
     global messages
+
+    content = []
+    tcs = {}
     
     messages = [{"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Who are you?"}]
+                {"role": "user", "content": "what are the names of the files in this directory?"}]
 
     stream, usage = open_stream(messages)
-    
-    response_text = ""
+
     for chunk in stream:
         if chunk.choices:
             delta = chunk.choices[0].delta
+            for tc in (delta.tool_calls or []):
+                s = tcs.setdefault(tc.index, {"id": "", "name": "", "args": ""})
+                if tc.id:
+                    s["id"] = tc.id
+                if tc.function and tc.function.name:
+                    s["name"] = tc.function.name
+                if tc.function and tc.function.arguments:
+                    s["args"] += tc.function.arguments
             if delta.content:
-                response_text += delta.content
                 print(delta.content, end="", flush=True)
-    
-    print()  # Newline after streaming
-    
-    messages.append({"role": "assistant", "content": response_text})
-    
-    return response_text
+                content.append(delta.content)
+
+    text = "".join(content)
+
+    if tcs:
+        ordered = [tcs[i] for i in sorted(tcs)]
+        parsed_args = []
+        parse_error = None
+
+        for c in ordered:
+            try:
+                parsed_args.append(json.loads(c["args"] or "{}"))
+            except json.JSONDecodeError as e:
+                parse_error = (c, e)
+                break
+        if parse_error is not None:
+            print("Error parsing args")
+
+        messages.append({"role": "assistant", "content": text or None, "tool_calls": [
+            {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["args"]}}
+            for c in ordered]})
+
+        for idx, (c, args) in enumerate(zip(ordered, parsed_args)):
+            result = run_tool(c["name"], args)
+            messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
+
+    if content:
+        messages.append({"role": "assistant", "content": text or None, "tool_calls": []})
+
+    print()
+    print(messages)
 
 
 # Load the environment file at startup
