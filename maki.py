@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 from openai import OpenAI
 
 
@@ -138,17 +139,41 @@ def write_file(path, content):
     return f"{content}"
 
 
+def edit_file(path, old, new):
+    """Replace one exact occurrence of `old` with `new` in a file."""
+    if not os.path.exists(path):
+        return f"Error: file not found: {path}"
+    
+    try:
+        with open(path, "r") as f:
+            content = f.read()
+        
+        if old not in content:
+            return f"Error: could not find {old!r} in file"
+        
+        new_content = content.replace(old, new, 1)  # Replace only the first occurrence
+        
+        with open(path, "w") as f:
+            f.write(new_content)
+        
+        return f"Success: replaced {old!r} with {new!r} in {path}"
+    
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"
+
+
 SYSTEM = """You are a terminal coding agent helping the user in the current directory. Use the following tools when necessary:
 
 - list_dir: List a directory
 - read_file: Read a file's contents with pagination. Returns lines numbered (1-based, like `cat -n`): a right-aligned number, a tab, then the line. Large files return only a window — pass offset and limit to page through.
 - write_file: Write (overwrite) a file.
+- edit_file: Replace one exact occurrence of `old` with `new` in a file.
 
 """
 
 
 DISPATCH = {
-    "write_file": write_file, "read_file": read_file, "list_dir": list_dir,
+    "read_file": read_file, "write_file": write_file, "edit_file": edit_file, "list_dir": list_dir,
 }
 
 
@@ -156,6 +181,8 @@ TOOLS = [
     {"type": "function", "function": {"name": "read_file", "description": "Read a file's contents with pagination. Returns lines numbered (1-based, like `cat -n`): a right-aligned number, a tab, then the line. Large files return only a window — pass offset and limit to page through.",
         "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}}, "required": ["path"]}}},
     {"type": "function", "function": {"name": "write_file", "description": "Write (overwrite) a file","parameters": {"type": "object", "properties": {"path": {"type": "string"},"content": {"type": "string"}}, "required": ["path", "content"]}}},
+    {"type": "function", "function": {"name": "edit_file", "description": "Replace one exact occurrence of `old` with `new` in a file.",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}}, "required": ["path", "old", "new"]}}},
     {"type": "function", "function": {"name": "list_dir", "description": "List a directory",
         "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
 ]
@@ -209,7 +236,7 @@ def model_turn(system_prompt):
     timings = None
 
     messages = [{"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Write a new file called example.py with a hello world print"}]
+                {"role": "user", "content": "Edit sample.txt to return 'Hello maki' instead of the current 'hello world'. Don't check the contents, just edit it"}]
 
     stream, usage = open_stream(messages)
 
