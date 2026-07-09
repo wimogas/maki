@@ -87,16 +87,24 @@ def _banner():
     print(f"maki - {MODEL}")
 
 
-def list_dir(path):
+def list_dir(path="."):
     """Return sorted directory listing."""
     try:
         entries = sorted(os.listdir(path))
-        return entries
+        return "\n".join(entries)
     except Exception as e:
         return f"Error: {str(e)}"
 
 
-SYSTEM = """You are a terminal coding agent."""
+SYSTEM = """You are a terminal coding agent helping the user in the current directory. Use the following tools when necessary:
+
+- list_dir
+- read_file
+- write_file
+- edit_file
+- run_bash
+
+"""
 
 
 DISPATCH = {
@@ -114,6 +122,10 @@ def run_tool(name, args):
 
     if not fn:
         return f"ERROR: unknown tool {name}"
+    arg_preview = json.dumps(args)
+    if len(arg_preview) > 120:
+        arg_preview = arg_preview[:117] + "..."
+    print(f"{arg_preview}")
 
     try:
         result = fn(**args)
@@ -149,7 +161,9 @@ def model_turn(system_prompt):
 
     content = []
     tcs = {}
-    
+    reasoning_chars = 0
+    timings = None
+
     messages = [{"role": "system", "content": system_prompt},
                 {"role": "user", "content": "what are the names of the files in this directory?"}]
 
@@ -157,8 +171,26 @@ def model_turn(system_prompt):
 
     for chunk in stream:
         if chunk.choices:
-            delta = chunk.choices[0].delta
-            for tc in (delta.tool_calls or []):
+            d = chunk.choices[0].delta
+            extra = getattr(chunk, "model_extra", None) or {}
+            if "timings" in extra:
+                timings = extra["timings"]
+            rc = getattr(d, "reasoning_content", None) or (d.model_extra or {}).get("reasoning_content")
+            if rc:
+                print(f"{rc}", end="", flush=True)
+                if not content and not tcs:
+                    reasoning_chars += len(rc)
+                if not content and not tcs and reasoning_chars >= 36000:
+                    print()
+                    print(f"reasoning only limit reached")
+                    close = getattr(stream, "close", None)
+                    if close:
+                        close()
+                    break
+            if d.content:
+                print(d.content, end="", flush=True)
+                content.append(d.content)
+            for tc in (d.tool_calls or []):
                 s = tcs.setdefault(tc.index, {"id": "", "name": "", "args": ""})
                 if tc.id:
                     s["id"] = tc.id
@@ -166,11 +198,14 @@ def model_turn(system_prompt):
                     s["name"] = tc.function.name
                 if tc.function and tc.function.arguments:
                     s["args"] += tc.function.arguments
-            if delta.content:
-                print(delta.content, end="", flush=True)
-                content.append(delta.content)
 
     text = "".join(content)
+
+    if timings and timings.get("predicted_n"):
+        prompt_n = timings.get("prompt_n", 0)
+        gen_n = timings["predicted_n"]
+        stats = f"context: {prompt_n}, tokens: {gen_n}"
+        print(stats)
 
     if tcs:
         ordered = [tcs[i] for i in sorted(tcs)]
@@ -198,7 +233,7 @@ def model_turn(system_prompt):
         messages.append({"role": "assistant", "content": text or None, "tool_calls": []})
 
     print()
-    print(messages)
+    print("LOG ------------------------------\n", messages, "\n----------------------------------")
 
 
 # Load the environment file at startup
