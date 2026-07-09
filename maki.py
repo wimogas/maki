@@ -273,20 +273,17 @@ def open_stream(msg, tools=TOOLS):
     
     return stream, {"total_cost": 0}
 
+TURN_DONE = "done"
+TURN_TOOL = "tool"
 
-def model_turn(system_prompt):
+def model_turn(messages):
     """Core turn execution with streaming.
     Sends the system prompt to the model and streams back the response.
     """
-    global messages
-
     content = []
     tcs = {}
     reasoning_chars = 0
     timings = None
-
-    messages = [{"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Add a new file called sample.py that prints Hello World"}]
 
     stream, usage = open_stream(messages)
 
@@ -325,7 +322,7 @@ def model_turn(system_prompt):
     if timings and timings.get("predicted_n"):
         prompt_n = timings.get("prompt_n", 0)
         gen_n = timings["predicted_n"]
-        stats = f"context: {prompt_n}, tokens: {gen_n}"
+        stats = f"\ncontext: {prompt_n}, tokens: {gen_n}"
         print(stats)
 
     if tcs:
@@ -349,12 +346,21 @@ def model_turn(system_prompt):
         for idx, (c, args) in enumerate(zip(ordered, parsed_args)):
             result = run_tool(c["name"], args)
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
-
+        return TURN_TOOL
     if content:
         messages.append({"role": "assistant", "content": text or None, "tool_calls": []})
 
     print()
     print("LOG ------------------------------\n", messages, "\n----------------------------------")
+    return TURN_DONE
+
+
+def run_model_turn_loop(messages):
+    """Run model_turn in a loop that breaks after 5 iterations or if status is TURN_DONE."""
+    for i in range(5):
+        status = model_turn(messages)
+        if status == TURN_DONE:
+            break
 
 
 # Load the environment file at startup
@@ -363,8 +369,16 @@ _load_env_file()
 # Initialize the source
 source = _init_source()
 
-# Display banner
-_banner()
 
-# Test 1 assistant response
-model_turn(SYSTEM)
+def main():
+
+    _banner()
+
+    messages = [{"role": "system", "content": SYSTEM},
+                {"role": "user", "content": "Change the function in sample.py to return Hello Maki?"}]
+
+    run_model_turn_loop(messages)
+
+
+if __name__ == "__main__":
+    main()
