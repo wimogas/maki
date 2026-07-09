@@ -162,18 +162,47 @@ def edit_file(path, old, new):
         return f"Error: {type(e).__name__}: {e}"
 
 
+def run_bash(command):
+    """Run a shell command and return output."""
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        output = result.stdout
+        error = result.stderr
+        return_code = result.returncode
+        
+        if error:
+            output += f"\n\nstderr: {error}"
+        
+        if return_code != 0:
+            return f"Command failed with exit code {return_code}:\n{output}"
+        else:
+            return output
+    
+    except subprocess.TimeoutExpired:
+        return "Command timed out after 120 seconds"
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"
+
+
 SYSTEM = """You are a terminal coding agent helping the user in the current directory. Use the following tools when necessary:
 
 - list_dir: List a directory
 - read_file: Read a file's contents with pagination. Returns lines numbered (1-based, like `cat -n`): a right-aligned number, a tab, then the line. Large files return only a window — pass offset and limit to page through.
 - write_file: Write (overwrite) a file.
 - edit_file: Replace one exact occurrence of `old` with `new` in a file.
+- run_bash: Run a shell command and return output.
 
 """
 
 
 DISPATCH = {
-    "read_file": read_file, "write_file": write_file, "edit_file": edit_file, "list_dir": list_dir,
+    "read_file": read_file, "write_file": write_file, "edit_file": edit_file, "list_dir": list_dir, "run_bash": run_bash
 }
 
 
@@ -185,6 +214,8 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}}, "required": ["path", "old", "new"]}}},
     {"type": "function", "function": {"name": "list_dir", "description": "List a directory",
         "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "run_bash", "description": "Run a shell command",
+        "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
 ]
 
 
@@ -236,7 +267,7 @@ def model_turn(system_prompt):
     timings = None
 
     messages = [{"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Edit sample.txt to return 'Hello maki' instead of the current 'hello world'. Don't check the contents, just edit it"}]
+                {"role": "user", "content": "Add an env variable to ~/.env called MAKI_TEST and set it to test"}]
 
     stream, usage = open_stream(messages)
 
