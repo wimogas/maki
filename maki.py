@@ -190,6 +190,18 @@ def run_bash(command):
         return f"Error: {type(e).__name__}: {e}"
 
 
+def confirm(message="Confirm assistant action? (y/n) "):
+    """Prompt the user for a y/n confirmation."""
+    response = input(message).strip().lower()
+    if response in ('y', 'yes'):
+        return True
+    elif response in ('n', 'no'):
+        return False
+    else:
+        print(f"Invalid input '{response}'. Please enter 'y' or 'n'.")
+        return confirm(message)
+
+
 SYSTEM = """You are a terminal coding agent helping the user in the current directory. Use the following tools when necessary:
 
 - list_dir: List a directory
@@ -229,6 +241,13 @@ def run_tool(name, args):
         arg_preview = arg_preview[:117] + "..."
     print(f"{arg_preview}")
 
+    # Confirm before running edit, write, or bash commands
+    if name in ('edit_file', 'write_file', 'run_bash'):
+        message = f"Run {name} with: {arg_preview} (y/n) "
+        if not confirm(message):
+            print(f"Cancelled: {name} was not executed.")
+            return "Cancelled by user"
+
     try:
         result = fn(**args)
     except Exception as e:
@@ -267,7 +286,7 @@ def model_turn(system_prompt):
     timings = None
 
     messages = [{"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Add an env variable to ~/.env called MAKI_TEST and set it to test"}]
+                {"role": "user", "content": "Add a new file called sample.py that prints Hello World"}]
 
     stream, usage = open_stream(messages)
 
