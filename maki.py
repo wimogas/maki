@@ -132,22 +132,30 @@ def read_file(path, offset=1, limit=400):
         return f"Error: {type(e).__name__}: {e}"
 
 
+def write_file(path, content):
+    with open(path, "w") as f:
+        f.write(content)
+    return f"{content}"
+
+
 SYSTEM = """You are a terminal coding agent helping the user in the current directory. Use the following tools when necessary:
 
-- list_dir
-- read_file
+- list_dir: List a directory
+- read_file: Read a file's contents with pagination. Returns lines numbered (1-based, like `cat -n`): a right-aligned number, a tab, then the line. Large files return only a window — pass offset and limit to page through.
+- write_file: Write (overwrite) a file.
 
 """
 
 
 DISPATCH = {
-    "read_file": read_file, "list_dir": list_dir,
+    "write_file": write_file, "read_file": read_file, "list_dir": list_dir,
 }
 
 
 TOOLS = [
     {"type": "function", "function": {"name": "read_file", "description": "Read a file's contents with pagination. Returns lines numbered (1-based, like `cat -n`): a right-aligned number, a tab, then the line. Large files return only a window — pass offset and limit to page through.",
         "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}}, "required": ["path"]}}},
+    {"type": "function", "function": {"name": "write_file", "description": "Write (overwrite) a file","parameters": {"type": "object", "properties": {"path": {"type": "string"},"content": {"type": "string"}}, "required": ["path", "content"]}}},
     {"type": "function", "function": {"name": "list_dir", "description": "List a directory",
         "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
 ]
@@ -201,7 +209,7 @@ def model_turn(system_prompt):
     timings = None
 
     messages = [{"role": "system", "content": system_prompt},
-                {"role": "user", "content": "what are the contents of sample.py?"}]
+                {"role": "user", "content": "Write a new file called example.py with a hello world print"}]
 
     stream, usage = open_stream(messages)
 
