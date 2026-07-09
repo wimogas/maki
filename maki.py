@@ -96,24 +96,60 @@ def list_dir(path="."):
         return f"Error: {str(e)}"
 
 
+def read_file(path, offset=1, limit=400):
+    """Read a file's contents with pagination.
+    Returns lines numbered (1-based, like `cat -n`): a right-aligned number, a tab, then the line.
+    Large files return only a window — pass offset and limit to page through.
+    """
+    if not os.path.exists(path):
+        return f"Error: file not found: {path}"
+    
+    try:
+        with open(path, 'r') as f:
+            lines = f.readlines()
+        
+        # Calculate start index (offset is 1-based)
+        start_idx = offset - 1
+        end_idx = start_idx + limit
+        
+        # Handle edge cases
+        if start_idx >= len(lines):
+            return f"Error: offset {offset} exceeds file length ({len(lines)} lines)"
+        
+        # Slice the lines
+        selected_lines = lines[start_idx:end_idx]
+        
+        # Format output with line numbers
+        output = []
+        for i, line in enumerate(selected_lines, start=start_idx + 1):
+            # Right-align number, tab, then content
+            num_str = f"{i:>6}"  # 6-character width for alignment
+            output.append(f"{num_str}\t{line.rstrip('\n')}")
+        
+        return "\n".join(output)
+    
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"
+
+
 SYSTEM = """You are a terminal coding agent helping the user in the current directory. Use the following tools when necessary:
 
 - list_dir
 - read_file
-- write_file
-- edit_file
-- run_bash
 
 """
 
 
 DISPATCH = {
-    "list_dir": list_dir
+    "read_file": read_file, "list_dir": list_dir,
 }
 
 
 TOOLS = [
-    {"type": "function", "function": {"name": "list_dir", "description": "List a directory","parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "read_file", "description": "Read a file's contents with pagination. Returns lines numbered (1-based, like `cat -n`): a right-aligned number, a tab, then the line. Large files return only a window — pass offset and limit to page through.",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}}, "required": ["path"]}}},
+    {"type": "function", "function": {"name": "list_dir", "description": "List a directory",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
 ]
 
 
@@ -165,7 +201,7 @@ def model_turn(system_prompt):
     timings = None
 
     messages = [{"role": "system", "content": system_prompt},
-                {"role": "user", "content": "what are the names of the files in this directory?"}]
+                {"role": "user", "content": "what are the contents of sample.py?"}]
 
     stream, usage = open_stream(messages)
 
