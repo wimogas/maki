@@ -7,49 +7,41 @@ from openai import OpenAI
 def _load_env_file():
     """Read `~/.env` or `MAKI_ENV_FILE`, populate `os.environ` with variables not already set
     Handle comments, blank lines, `export` prefixes, quoted values"""
-    # First try to get the environment file from the MAKI_ENV_FILE environment variable
+
     env_file = os.environ.get('MAKI_ENV_FILE', os.path.expanduser('~/.env'))
 
-    # If the file doesn't exist, we can't do anything
     if not os.path.exists(env_file):
         return
 
-    # Read the file
     with open(env_file, 'r') as f:
         lines = f.readlines()
 
-    # Process each line
     for line in lines:
         line = line.strip()
 
-        # Skip empty lines and comments
         if not line or line.startswith('#'):
             continue
 
-        # Handle `export` prefix
         if line.startswith('export '):
-            line = line[7:]  # Remove 'export '
+            line = line[7:]
 
-        # Handle quoted values
         if line.startswith('"') and line.endswith('"'):
-            # Simple case: quoted string
             key, value = line.split('=', 1)
             key = key.strip()
             value = value.strip()[1:-1]  # Remove the quotes
         elif line.find('=') != -1:
-            # Unquoted value
             key, value = line.split('=', 1)
             key = key.strip()
             value = value.strip()
         else:
-            # Just a key with no value (treat as empty value)
             key = line
             value = ''
 
-        # Only set the environment variable if it's not already set
         if key not in os.environ:
             os.environ[key] = value
 
+client = None
+MODEL = None
 
 class Source:
     def __init__(self, name, base_url, model=None):
@@ -66,26 +58,26 @@ class Source:
 
 def _init_source():
     """Build one Source (name, base_url, api_key, model, OpenAI client) from env vars."""
-    global client, MODEL, ACTIVE
-    
-    # Build source from env vars
+    global client, MODEL
+
     base_url = os.environ.get("MAKI_BASE_URL", "http://localhost:8080/v1")
     model = os.environ.get("MAKI_MODEL")
-    
-    # Create the source
+
     src = Source("local", base_url, model)
-    
-    # Set globals
+
     client = src.client
     MODEL = src.get_model()
-    ACTIVE = src
-    
-    return src
+
+
+DIM, CYAN, GREEN, YELLOW, RED, MAGENTA, BOLD, RESET = (
+    "\033[2m", "\033[36m", "\033[32m", "\033[33m", "\033[31m", "\033[35m",
+    "\033[1m", "\033[0m",
+)
 
 
 def _banner():
     """Display startup banner with model name."""
-    print(f"maki - {MODEL}")
+    print(f"{BOLD}maki{RESET} - {CYAN}{MODEL}{RESET}")
 
 
 def list_dir(path="."):
@@ -108,23 +100,18 @@ def read_file(path, offset=1, limit=400):
     try:
         with open(path, 'r') as f:
             lines = f.readlines()
-        
-        # Calculate start index (offset is 1-based)
+
         start_idx = offset - 1
         end_idx = start_idx + limit
-        
-        # Handle edge cases
+
         if start_idx >= len(lines):
             return f"Error: offset {offset} exceeds file length ({len(lines)} lines)"
-        
-        # Slice the lines
+
         selected_lines = lines[start_idx:end_idx]
-        
-        # Format output with line numbers
+
         output = []
         for i, line in enumerate(selected_lines, start=start_idx + 1):
-            # Right-align number, tab, then content
-            num_str = f"{i:>6}"  # 6-character width for alignment
+            num_str = f"{i:>6}"
             output.append(f"{num_str}\t{line.rstrip('\n')}")
         
         return "\n".join(output)
@@ -192,7 +179,7 @@ def run_bash(command):
 
 def confirm(message="Confirm assistant action? (y/n) "):
     """Prompt the user for a y/n confirmation."""
-    response = input(message).strip().lower()
+    response = input(YELLOW + message + RESET).strip().lower()
     if response in ('y', 'yes'):
         return True
     elif response in ('n', 'no'):
@@ -236,16 +223,16 @@ def run_tool(name, args):
 
     if not fn:
         return f"ERROR: unknown tool {name}"
+    print()
+    print(f"{CYAN}(calling tool: {name}){RESET}")
     arg_preview = json.dumps(args)
-    if len(arg_preview) > 120:
-        arg_preview = arg_preview[:117] + "..."
-    print(f"{arg_preview}")
+    print(f"{DIM}{arg_preview}{RESET}")
+    print()
 
-    # Confirm before running edit, write, or bash commands
     if name in ('edit_file', 'write_file', 'run_bash'):
-        message = f"Run {name} with: {arg_preview} (y/n) "
+        message = f"Run {name} with: {arg_preview}? (y/n) "
         if not confirm(message):
-            print(f"Cancelled: {name} was not executed.")
+            print(f"{YELLOW}Cancelled: {name} was not executed.{RESET}")
             return "Cancelled by user"
 
     try:
@@ -253,8 +240,7 @@ def run_tool(name, args):
     except Exception as e:
         result = f"ERROR: {type(e).__name__}: {e}"
 
-    print(result)
-
+    print(result if len(result) < 800 else result[:800] + f"\n... [{len(result) - 800} more chars]")
     return result
 
 def open_stream(msg, tools=TOOLS):
@@ -271,7 +257,7 @@ def open_stream(msg, tools=TOOLS):
         temperature=0.7
     )
     
-    return stream, {"total_cost": 0}
+    return stream
 
 TURN_DONE = "done"
 TURN_TOOL = "tool"
@@ -282,32 +268,45 @@ def model_turn(messages):
     """
     content = []
     tcs = {}
+    mode = None
     reasoning_chars = 0
     timings = None
 
-    stream, usage = open_stream(messages)
+    stream = open_stream(messages)
 
     for chunk in stream:
         if chunk.choices:
             d = chunk.choices[0].delta
             extra = getattr(chunk, "model_extra", None) or {}
+
             if "timings" in extra:
                 timings = extra["timings"]
+
             rc = getattr(d, "reasoning_content", None) or (d.model_extra or {}).get("reasoning_content")
             if rc:
-                print(f"{rc}", end="", flush=True)
+                if mode != 'think':
+                    print()
+                    print(f"{DIM}(thinking)")
+                    print()
+                    mode = 'think'
+                print(f"{DIM}{rc}{RESET}", end="", flush=True)
                 if not content and not tcs:
                     reasoning_chars += len(rc)
                 if not content and not tcs and reasoning_chars >= 36000:
                     print()
-                    print(f"reasoning only limit reached")
+                    print(f"{YELLOW}(reasoning-only limit reached){RESET}")
                     close = getattr(stream, "close", None)
                     if close:
                         close()
                     break
+
             if d.content:
+                if mode == 'think':
+                    print()
+                mode = 'say'
                 print(d.content, end="", flush=True)
                 content.append(d.content)
+
             for tc in (d.tool_calls or []):
                 s = tcs.setdefault(tc.index, {"id": "", "name": "", "args": ""})
                 if tc.id:
@@ -322,7 +321,8 @@ def model_turn(messages):
     if timings and timings.get("predicted_n"):
         prompt_n = timings.get("prompt_n", 0)
         gen_n = timings["predicted_n"]
-        stats = f"\ncontext: {prompt_n}, tokens: {gen_n}"
+        stats = f"context: {prompt_n}, tokens: {gen_n}\n"
+        print("\n-------------------------------")
         print(stats)
 
     if tcs:
@@ -337,7 +337,7 @@ def model_turn(messages):
                 parse_error = (c, e)
                 break
         if parse_error is not None:
-            print("Error parsing args")
+            print(f"{RED}Error parsing args{RESET}")
 
         messages.append({"role": "assistant", "content": text or None, "tool_calls": [
             {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["args"]}}
@@ -347,17 +347,18 @@ def model_turn(messages):
             result = run_tool(c["name"], args)
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
         return TURN_TOOL
+
     if content:
         messages.append({"role": "assistant", "content": text or None, "tool_calls": []})
 
     print()
-    print("LOG ------------------------------\n", messages, "\n----------------------------------")
+    print(f"{DIM}-------------------------------\n{messages}\n------------------------------{RESET}")
     return TURN_DONE
 
 
 def run_model_turn_loop(messages):
-    """Run model_turn in a loop that breaks after 5 iterations or if status is TURN_DONE."""
-    for i in range(5):
+    """Run model_turn in a loop that breaks after 10 iterations or if status is TURN_DONE."""
+    for i in range(10):
         status = model_turn(messages)
         if status == TURN_DONE:
             break
@@ -367,7 +368,7 @@ def run_model_turn_loop(messages):
 _load_env_file()
 
 # Initialize the source
-source = _init_source()
+_init_source()
 
 
 def main():
