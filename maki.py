@@ -5,8 +5,7 @@ from openai import OpenAI
 
 
 def _load_env_file():
-    """Read `~/.env` or `MAKI_ENV_FILE`, populate `os.environ` with variables not already set
-    Handle comments, blank lines, `export` prefixes, quoted values"""
+    """Read `~/.env` or `MAKI_ENV_FILE`, populate `os.environ` with variables not already set"""
 
     env_file = os.environ.get('MAKI_ENV_FILE', os.path.expanduser('~/.env'))
 
@@ -40,8 +39,10 @@ def _load_env_file():
         if key not in os.environ:
             os.environ[key] = value
 
+
 client = None
 MODEL = None
+
 
 class Source:
     def __init__(self, name, base_url, model=None):
@@ -50,7 +51,6 @@ class Source:
         self.api_key = "noop"
         self.model = model
         self.client = OpenAI(base_url=base_url, api_key=self.api_key)
-
 
     def get_model(self):
         return self.model
@@ -90,10 +90,7 @@ def list_dir(path="."):
 
 
 def read_file(path, offset=1, limit=400):
-    """Read a file's contents with pagination.
-    Returns lines numbered (1-based, like `cat -n`): a right-aligned number, a tab, then the line.
-    Large files return only a window — pass offset and limit to page through.
-    """
+    """Read a file's contents with pagination."""
     if not os.path.exists(path):
         return f"Error: file not found: {path}"
     
@@ -223,6 +220,7 @@ def run_tool(name, args):
 
     if not fn:
         return f"ERROR: unknown tool {name}"
+
     print()
     print(f"{CYAN}(calling tool: {name}){RESET}")
     arg_preview = json.dumps(args)
@@ -243,12 +241,10 @@ def run_tool(name, args):
     print(result if len(result) < 800 else result[:800] + f"\n... [{len(result) - 800} more chars]")
     return result
 
-def open_stream(msg, tools=TOOLS):
-    """Open streaming connection to the single LLM endpoint.
-    Returns (stream_iterator, usage_dict) for consumption by model_turn.
-    """
-    global client, MODEL
 
+def open_stream(msg, tools=TOOLS):
+    """Open streaming connection to the single LLM endpoint."""
+    global client, MODEL
     stream = client.chat.completions.create(
         model=MODEL,
         messages=msg,
@@ -256,16 +252,15 @@ def open_stream(msg, tools=TOOLS):
         stream=True,
         temperature=0.7
     )
-    
     return stream
+
 
 TURN_DONE = "done"
 TURN_TOOL = "tool"
 
+
 def model_turn(messages):
-    """Core turn execution with streaming.
-    Sends the system prompt to the model and streams back the response.
-    """
+    """Core turn execution with streaming."""
     content = []
     tcs = {}
     mode = None
@@ -285,7 +280,6 @@ def model_turn(messages):
             rc = getattr(d, "reasoning_content", None) or (d.model_extra or {}).get("reasoning_content")
             if rc:
                 if mode != 'think':
-                    print()
                     print(f"{DIM}(thinking)")
                     print()
                     mode = 'think'
@@ -322,7 +316,7 @@ def model_turn(messages):
         prompt_n = timings.get("prompt_n", 0)
         gen_n = timings["predicted_n"]
         stats = f"context: {prompt_n}, tokens: {gen_n}\n"
-        print("\n-------------------------------")
+        print("\n────────────────────────────")
         print(stats)
 
     if tcs:
@@ -351,12 +345,10 @@ def model_turn(messages):
     if content:
         messages.append({"role": "assistant", "content": text or None, "tool_calls": []})
 
-    print()
-    print(f"{DIM}-------------------------------\n{messages}\n------------------------------{RESET}")
     return TURN_DONE
 
 
-def run_model_turn_loop(messages):
+def _run_model_turn_loop(messages):
     """Run model_turn in a loop that breaks after 10 iterations or if status is TURN_DONE."""
     for i in range(10):
         status = model_turn(messages)
@@ -374,11 +366,19 @@ _init_source()
 def main():
 
     _banner()
+    messages = [{"role": "system", "content": SYSTEM}]
 
-    messages = [{"role": "system", "content": SYSTEM},
-                {"role": "user", "content": "Change the function in sample.py to return Hello Maki?"}]
+    while True:
+        print(f"{DIM}/exit (end session) {RESET}")
+        user = input()
 
-    run_model_turn_loop(messages)
+        if user == "/exit":
+            break
+        print()
+        messages.append({"role": "user", "content": user})
+        _run_model_turn_loop(messages)
+
+    print(f"{DIM}────────────────────────────\n{messages}\n────────────────────────────{RESET}")
 
 
 if __name__ == "__main__":
