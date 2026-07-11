@@ -7,24 +7,17 @@ from openai import OpenAI
 
 def _load_env_file():
     """Read `~/.env` or `MAKI_ENV_FILE`, populate `os.environ` with variables not already set"""
-
     env_file = os.environ.get('MAKI_ENV_FILE', os.path.expanduser('~/.env'))
-
     if not os.path.exists(env_file):
         return
-
     with open(env_file, 'r') as f:
         lines = f.readlines()
-
     for line in lines:
         line = line.strip()
-
         if not line or line.startswith('#'):
             continue
-
         if line.startswith('export '):
             line = line[7:]
-
         if line.startswith('"') and line.endswith('"'):
             key, value = line.split('=', 1)
             key = key.strip()
@@ -36,7 +29,6 @@ def _load_env_file():
         else:
             key = line
             value = ''
-
         if key not in os.environ:
             os.environ[key] = value
 
@@ -46,14 +38,17 @@ SESSION_HOME = os.path.expanduser(
 )
 
 
-def save_session(messages, session_id):
+def _sessions_dir():
+    return os.path.join(SESSION_HOME, "sessions")
+
+
+def _session_path(session_id):
+    return os.path.join(_sessions_dir(), f"{session_id}.json")
+
+
+def _save_session(messages, session_id):
     """Save the current session messages as a JSON file in the sessions directory."""
-
-    session_dir = os.path.join(SESSION_HOME, "sessions")
-    os.makedirs(session_dir, exist_ok=True)
-    filename = f"{session_id}.json"
-    filepath = os.path.join(session_dir, filename)
-
+    filepath = _session_path(session_id)
     try:
         with open(filepath, "w") as f:
             json.dump(messages, f, indent=2)
@@ -62,19 +57,46 @@ def save_session(messages, session_id):
         pass
 
 
-def load_session(session_id):
+def _load_session(session_id):
     """Load the current session messages as a JSON file in the sessions directory."""
-
-    session_dir = os.path.join(SESSION_HOME, "sessions")
-    filename = f"{session_id}.json"
-    filepath = os.path.join(session_dir, filename)
-
+    filepath = _session_path(session_id)
     try:
         with open(filepath, "r") as f:
             return json.load(f)
     except (OSError, IOError, json.JSONDecodeError):
         pass
     return None
+
+
+def _first_user_message(filepath):
+    """Read a session JSON file and return the first user message."""
+    try:
+        with open(filepath, 'r') as f:
+            messages = json.load(f)
+        for message in messages:
+            if message.get('role') == 'user':
+                text = message['content']
+                if len(text) > 60:
+                    text = text[:59] + "..."
+                return text
+    except (OSError, IOError, json.JSONDecodeError) as e:
+        pass
+    return None
+
+
+def _list_sessions():
+    """List the last 10 sessions in the sessions directory."""
+    session_dir = os.path.join(SESSION_HOME, "sessions")
+    if not os.path.exists(session_dir):
+        print(f"{YELLOW}(no sessions directory found){RESET}")
+        return
+    filenames = sorted(os.listdir(session_dir), reverse=True)[:10]
+    if not filenames:
+        print(f"{YELLOW}(no sessions found){RESET}")
+        return
+    for filename in filenames:
+        filepath = os.path.join(session_dir, filename)
+        print(f"{MAGENTA}{filename.replace(".json", "")}{RESET} · {_first_user_message(filepath)}")
 
 
 class Source:
@@ -84,7 +106,6 @@ class Source:
         self.api_key = "noop"
         self.model = model
         self.client = OpenAI(base_url=base_url, api_key=self.api_key)
-
     def get_model(self):
         return self.model
 
@@ -92,12 +113,9 @@ class Source:
 def _init_source():
     """Build one Source (name, base_url, api_key, model, OpenAI client) from env vars."""
     global client, MODEL
-
     base_url = os.environ.get("MAKI_BASE_URL", "http://localhost:8080/v1")
     model = os.environ.get("MAKI_MODEL")
-
     src = Source("local", base_url, model)
-
     client = src.client
     MODEL = src.get_model()
 
@@ -109,7 +127,6 @@ DIM, CYAN, GREEN, YELLOW, RED, MAGENTA, BOLD, RESET = (
 
 
 def _banner():
-    """Display startup banner with model name."""
     print(f"{BOLD}maki{RESET} - {CYAN}{MODEL}{RESET}")
 
 
@@ -126,26 +143,19 @@ def read_file(path, offset=1, limit=400):
     """Read a file's contents with pagination."""
     if not os.path.exists(path):
         return f"Error: file not found: {path}"
-    
     try:
         with open(path, 'r') as f:
             lines = f.readlines()
-
         start_idx = offset - 1
         end_idx = start_idx + limit
-
         if start_idx >= len(lines):
             return f"Error: offset {offset} exceeds file length ({len(lines)} lines)"
-
         selected_lines = lines[start_idx:end_idx]
-
         output = []
         for i, line in enumerate(selected_lines, start=start_idx + 1):
             num_str = f"{i:>6}"
             output.append(f"{num_str}\t{line.rstrip('\n')}")
-        
         return "\n".join(output)
-    
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
 
@@ -160,21 +170,15 @@ def edit_file(path, old, new):
     """Replace one exact occurrence of `old` with `new` in a file."""
     if not os.path.exists(path):
         return f"Error: file not found: {path}"
-    
     try:
         with open(path, "r") as f:
             content = f.read()
-        
         if old not in content:
             return f"Error: could not find {old!r} in file"
-        
         new_content = content.replace(old, new, 1)  # Replace only the first occurrence
-        
         with open(path, "w") as f:
             f.write(new_content)
-        
         return f"Success: replaced {old!r} with {new!r} in {path}"
-    
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
 
@@ -200,14 +204,13 @@ def run_bash(command):
             return f"Command failed with exit code {return_code}:\n{output}"
         else:
             return output
-    
     except subprocess.TimeoutExpired:
         return "Command timed out after 120 seconds"
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
 
 
-def confirm(message="Confirm assistant action? (y/n) "):
+def _confirm(message="Confirm assistant action? (y/n) "):
     """Prompt the user for a y/n confirmation."""
     response = input(YELLOW + message + RESET).strip().lower()
     if response in ('y', 'yes'):
@@ -216,7 +219,7 @@ def confirm(message="Confirm assistant action? (y/n) "):
         return False
     else:
         print(f"Invalid input '{response}'. Please enter 'y' or 'n'.")
-        return confirm(message)
+        return _confirm(message)
 
 
 SYSTEM = """You are a terminal coding agent helping the user in the current directory. Use the following tools when necessary:
@@ -250,27 +253,22 @@ TOOLS = [
 
 def run_tool(name, args):
     fn = DISPATCH.get(name)
-
     if not fn:
         return f"ERROR: unknown tool {name}"
-
-    print()
     print(f"{CYAN}(calling tool: {name}){RESET}")
     arg_preview = json.dumps(args)
+    if len(arg_preview) > 120:
+        arg_preview = arg_preview[:117] + "..."
     print(f"{DIM}{arg_preview}{RESET}")
-    print()
-
     if name in ('edit_file', 'write_file', 'run_bash'):
-        message = f"Run {name} with: {arg_preview}? (y/n) "
-        if not confirm(message):
-            print(f"{YELLOW}Cancelled: {name} was not executed.{RESET}")
+        message = f"(awaiting permission: {name}?) (y/n) "
+        if not _confirm(message):
+            print(f"{YELLOW}(cancelled: {name} was not executed){RESET}")
             return "Cancelled by user"
-
     try:
         result = fn(**args)
     except Exception as e:
         result = f"ERROR: {type(e).__name__}: {e}"
-
     print(result if len(result) < 800 else result[:800] + f"\n... [{len(result) - 800} more chars]")
     return result
 
@@ -283,7 +281,6 @@ def open_stream(msg, tools=TOOLS):
         messages=msg,
         tools=tools,
         stream=True,
-        temperature=0.7
     )
     return stream
 
@@ -299,17 +296,13 @@ def model_turn(messages):
     mode = None
     reasoning_chars = 0
     timings = None
-
     stream = open_stream(messages)
-
     for chunk in stream:
         if chunk.choices:
             d = chunk.choices[0].delta
             extra = getattr(chunk, "model_extra", None) or {}
-
             if "timings" in extra:
                 timings = extra["timings"]
-
             rc = getattr(d, "reasoning_content", None) or (d.model_extra or {}).get("reasoning_content")
             if rc:
                 if mode != 'think':
@@ -326,14 +319,12 @@ def model_turn(messages):
                     if close:
                         close()
                     break
-
             if d.content:
                 if mode == 'think':
                     print()
                 mode = 'say'
                 print(d.content, end="", flush=True)
                 content.append(d.content)
-
             for tc in (d.tool_calls or []):
                 s = tcs.setdefault(tc.index, {"id": "", "name": "", "args": ""})
                 if tc.id:
@@ -342,21 +333,17 @@ def model_turn(messages):
                     s["name"] = tc.function.name
                 if tc.function and tc.function.arguments:
                     s["args"] += tc.function.arguments
-
     text = "".join(content)
-
     if timings and timings.get("predicted_n"):
         prompt_n = timings.get("prompt_n", 0)
         gen_n = timings["predicted_n"]
         stats = f"context: {prompt_n}, tokens: {gen_n}\n"
         print("\n────────────────────────────")
         print(stats)
-
     if tcs:
         ordered = [tcs[i] for i in sorted(tcs)]
         parsed_args = []
         parse_error = None
-
         for c in ordered:
             try:
                 parsed_args.append(json.loads(c["args"] or "{}"))
@@ -365,19 +352,15 @@ def model_turn(messages):
                 break
         if parse_error is not None:
             print(f"{RED}Error parsing args{RESET}")
-
         messages.append({"role": "assistant", "content": text or None, "tool_calls": [
             {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["args"]}}
             for c in ordered]})
-
         for idx, (c, args) in enumerate(zip(ordered, parsed_args)):
             result = run_tool(c["name"], args)
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
         return TURN_TOOL
-
     if content:
         messages.append({"role": "assistant", "content": text or None, "tool_calls": []})
-
     return TURN_DONE
 
 
@@ -397,18 +380,18 @@ _init_source()
 
 
 def main():
-
     _banner()
     messages = [{"role": "system", "content": SYSTEM}]
     session_id = f"{secrets.token_hex(3)}"
-
     while True:
-        print(f"{DIM}/session id (resume session) · /exit (end session) {RESET}")
+        print(f"{DIM}/sessions (list sessions) · /session id (resume session) · /exit (end session) {RESET}")
         user = input()
-
+        if user == "/sessions":
+            _list_sessions()
+            continue
         if user.startswith("/session"):
             session_id = user.strip("/session ")
-            data = load_session(session_id) or []
+            data = _load_session(session_id) or []
             if len(data) > 0:
                 messages = data
                 print(f"{GREEN}(session loaded){RESET}")
@@ -416,16 +399,14 @@ def main():
             elif not session_id or len(data) == 0:
                 print(f"{RED}(session not found){RESET}")
                 continue
-
         elif user == "/exit":
             if len(messages) > 2:
-                save_session(messages, session_id)
+                _save_session(messages, session_id)
             break
-
         print()
         messages.append({"role": "user", "content": user})
         _run_model_turn_loop(messages)
-        save_session(messages, session_id)
+        _save_session(messages, session_id)
 
 
 if __name__ == "__main__":
