@@ -2,6 +2,8 @@ import json
 import os
 import subprocess
 import secrets
+import time
+
 from openai import OpenAI
 
 
@@ -46,12 +48,21 @@ def _session_path(session_id):
     return os.path.join(_sessions_dir(), f"{session_id}.json")
 
 
+def _new_session_id():
+    return f"{secrets.token_hex(3)}"
+
+
 def _save_session(messages, session_id):
     """Save the current session messages as a JSON file in the sessions directory."""
     filepath = _session_path(session_id)
     try:
         with open(filepath, "w") as f:
-            json.dump(messages, f, indent=2)
+            now = time.time()
+            data = {
+                "messages": messages,
+                "created_at": now
+            }
+            json.dump(data, f, indent=2)
             print(f"{GREEN}(session saved){RESET}")
     except (OSError, IOError, json.JSONDecodeError):
         pass
@@ -72,8 +83,8 @@ def _first_user_message(filepath):
     """Read a session JSON file and return the first user message."""
     try:
         with open(filepath, 'r') as f:
-            messages = json.load(f)
-        for message in messages:
+            data = json.load(f)
+        for message in data["messages"]:
             if message.get('role') == 'user':
                 text = message['content']
                 if len(text) > 60:
@@ -382,7 +393,7 @@ _init_source()
 def main():
     _banner()
     messages = [{"role": "system", "content": SYSTEM}]
-    session_id = f"{secrets.token_hex(3)}"
+    session_id = _new_session_id()
     while True:
         print(f"{DIM}/sessions (list sessions) · /session id (resume session) · /exit (end session) {RESET}")
         user = input()
@@ -391,12 +402,12 @@ def main():
             continue
         if user.startswith("/session"):
             session_id = user.strip("/session ")
-            data = _load_session(session_id) or []
-            if len(data) > 0:
-                messages = data
+            data = _load_session(session_id) or {}
+            if data and len(data["messages"]) > 0:
+                messages = data["messages"]
                 print(f"{GREEN}(session loaded){RESET}")
                 continue
-            elif not session_id or len(data) == 0:
+            elif not session_id or not data:
                 print(f"{RED}(session not found){RESET}")
                 continue
         elif user == "/exit":
