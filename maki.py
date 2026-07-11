@@ -56,12 +56,19 @@ def _save_session(messages, session_id):
     """Save the current session messages as a JSON file in the sessions directory."""
     filepath = _session_path(session_id)
     try:
-        with open(filepath, "w") as f:
-            now = time.time()
+        now = time.time()
+        if os.path.exists(filepath):
+            with open(filepath, "r") as f:
+                data = json.load(f)
+            data["messages"] = messages
+            data["updated_at"] = now
+        else:
             data = {
                 "messages": messages,
-                "created_at": now
+                "created_at": now,
+                "updated_at": now
             }
+        with open(filepath, "w") as f:
             json.dump(data, f, indent=2)
             print(f"{GREEN}(session saved){RESET}")
     except (OSError, IOError, json.JSONDecodeError):
@@ -96,18 +103,33 @@ def _first_user_message(filepath):
 
 
 def _list_sessions():
-    """List the last 10 sessions in the sessions directory."""
-    session_dir = os.path.join(SESSION_HOME, "sessions")
-    if not os.path.exists(session_dir):
+    sessions_dir = _sessions_dir()
+    if not os.path.exists(sessions_dir):
         print(f"{YELLOW}(no sessions directory found){RESET}")
         return
-    filenames = sorted(os.listdir(session_dir), reverse=True)[:10]
+    filenames = os.listdir(sessions_dir)
     if not filenames:
         print(f"{YELLOW}(no sessions found){RESET}")
         return
+    sessions = []
     for filename in filenames:
-        filepath = os.path.join(session_dir, filename)
-        print(f"{MAGENTA}{filename.replace(".json", "")}{RESET} · {_first_user_message(filepath)}")
+        filepath = os.path.join(sessions_dir, filename)
+        try:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+                sessions.append({
+                    'filename': filename,
+                    'updated_at': data.get('updated_at', 0),
+                    'first_message': _first_user_message(filepath)
+                })
+        except (OSError, IOError, json.JSONDecodeError):
+            continue
+    sessions.sort(key=lambda x: x['updated_at'], reverse=True)
+    sessions = sessions[:10]
+    for session in sessions:
+        filename = session['filename']
+        first_message = session['first_message']
+        print(f"{MAGENTA}{filename.replace('.json', '')}{RESET} · {first_message}")
 
 
 class Source:
