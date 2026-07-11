@@ -46,8 +46,35 @@ SESSION_HOME = os.path.expanduser(
 )
 
 
-client = None
-MODEL = None
+def save_session(messages, session_id):
+    """Save the current session messages as a JSON file in the sessions directory."""
+
+    session_dir = os.path.join(SESSION_HOME, "sessions")
+    os.makedirs(session_dir, exist_ok=True)
+    filename = f"{session_id}.json"
+    filepath = os.path.join(session_dir, filename)
+
+    try:
+        with open(filepath, "w") as f:
+            json.dump(messages, f, indent=2)
+            print(f"{GREEN}(session saved){RESET}")
+    except (OSError, IOError, json.JSONDecodeError):
+        pass
+
+
+def load_session(session_id):
+    """Load the current session messages as a JSON file in the sessions directory."""
+
+    session_dir = os.path.join(SESSION_HOME, "sessions")
+    filename = f"{session_id}.json"
+    filepath = os.path.join(session_dir, filename)
+
+    try:
+        with open(filepath, "r") as f:
+            return json.load(f)
+    except (OSError, IOError, json.JSONDecodeError):
+        pass
+    return None
 
 
 class Source:
@@ -362,20 +389,6 @@ def _run_model_turn_loop(messages):
             break
 
 
-def save_session(messages, session_id):
-    """Save the current session messages as a JSON file in the sessions directory."""
-
-    session_dir = os.path.join(SESSION_HOME, "sessions")
-    os.makedirs(session_dir, exist_ok=True)
-    filename = f"{session_id}.json"
-    filepath = os.path.join(session_dir, filename)
-
-    with open(filepath, "w") as f:
-        json.dump(messages, f, indent=2)
-
-    print(f"{GREEN}(session saved){RESET}")
-
-
 # Load the environment file at startup
 _load_env_file()
 
@@ -390,17 +403,28 @@ def main():
     session_id = f"{secrets.token_hex(3)}"
 
     while True:
-        print(f"{DIM}/exit (end session) {RESET}")
+        print(f"{DIM}/session id (resume session) · /exit (end session) {RESET}")
         user = input()
 
-        if user == "/exit":
-            save_session(messages, session_id)
+        if user.startswith("/session"):
+            session_id = user.strip("/session ")
+            data = load_session(session_id) or []
+            if len(data) > 0:
+                messages = data
+                print(f"{GREEN}(session loaded){RESET}")
+                continue
+            elif not session_id or len(data) == 0:
+                print(f"{RED}(session not found){RESET}")
+                continue
+
+        elif user == "/exit":
+            if len(messages) > 2:
+                save_session(messages, session_id)
             break
 
         print()
         messages.append({"role": "user", "content": user})
         _run_model_turn_loop(messages)
-
         save_session(messages, session_id)
 
 
