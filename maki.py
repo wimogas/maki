@@ -136,7 +136,7 @@ class Source:
     def __init__(self, name, base_url, model=None):
         self.name = name
         self.base_url = base_url
-        self.api_key = "noop"
+        self.api_key = "makinillo"
         self.model = model
         self.client = OpenAI(base_url=base_url, api_key=self.api_key)
     def get_model(self):
@@ -265,11 +265,9 @@ SYSTEM = """You are a terminal coding agent helping the user in the current dire
 
 """
 
-
 DISPATCH = {
     "read_file": read_file, "write_file": write_file, "edit_file": edit_file, "list_dir": list_dir, "run_bash": run_bash
 }
-
 
 TOOLS = [
     {"type": "function", "function": {"name": "read_file", "description": "Read a file's contents with pagination. Returns lines numbered (1-based, like `cat -n`): a right-aligned number, a tab, then the line. Large files return only a window — pass offset and limit to page through.",
@@ -293,16 +291,18 @@ def run_tool(name, args):
     if len(arg_preview) > 120:
         arg_preview = arg_preview[:117] + "..."
     print(f"{DIM}{arg_preview}{RESET}")
+    print()
     if name in ('edit_file', 'write_file', 'run_bash'):
-        message = f"(awaiting permission: {name}?) (y/n) "
+        message = f"run {name}? (y/n) "
         if not _confirm(message):
-            print(f"{YELLOW}(permission denied: {name} was not executed){RESET}")
+            print(f"{YELLOW}({name} was not executed){RESET}")
             return None
     try:
         result = fn(**args)
     except Exception as e:
-        result = f"ERROR: {type(e).__name__}: {e}"
+        result = f"{RED}ERROR: {type(e).__name__}: {e}{RESET}"
     print(result if len(result) < 800 else result[:800] + f"\n... [{len(result) - 800} more chars]")
+    print()
     return result
 
 
@@ -340,13 +340,11 @@ def model_turn(messages):
             if rc:
                 if mode != 'think':
                     print(f"{DIM}(thinking)")
-                    print()
                     mode = 'think'
                 print(f"{DIM}{rc}{RESET}", end="", flush=True)
                 if not content and not tcs:
                     reasoning_chars += len(rc)
                 if not content and not tcs and reasoning_chars >= 36000:
-                    print()
                     print(f"{YELLOW}(reasoning-only limit reached){RESET}")
                     close = getattr(stream, "close", None)
                     if close:
@@ -370,7 +368,7 @@ def model_turn(messages):
     if timings and timings.get("predicted_n"):
         prompt_n = timings.get("prompt_n", 0)
         gen_n = timings["predicted_n"]
-        stats = f"context: {prompt_n}, tokens: {gen_n}\n"
+        stats = f"tokens: {gen_n}, context: {prompt_n}\n"
         print("\n────────────────────────────")
         print(stats)
     if tcs:
@@ -390,7 +388,11 @@ def model_turn(messages):
             for c in ordered]})
         for idx, (c, args) in enumerate(zip(ordered, parsed_args)):
             result = run_tool(c["name"], args)
-            if not result:
+            if result:
+                if c["name"] in ('write_file', 'edit_file') and _confirm(f"{YELLOW}run git diff? [will end model turn] (y/n){RESET}"):
+                    print(run_bash("git --no-pager diff HEAD~"))
+                    return TURN_DONE
+            else:
                 return TURN_DONE
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
         return TURN_TOOL
