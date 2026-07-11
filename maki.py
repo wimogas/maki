@@ -296,8 +296,8 @@ def run_tool(name, args):
     if name in ('edit_file', 'write_file', 'run_bash'):
         message = f"(awaiting permission: {name}?) (y/n) "
         if not _confirm(message):
-            print(f"{YELLOW}(cancelled: {name} was not executed){RESET}")
-            return "Cancelled by user"
+            print(f"{YELLOW}(permission denied: {name} was not executed){RESET}")
+            return None
     try:
         result = fn(**args)
     except Exception as e:
@@ -390,6 +390,8 @@ def model_turn(messages):
             for c in ordered]})
         for idx, (c, args) in enumerate(zip(ordered, parsed_args)):
             result = run_tool(c["name"], args)
+            if not result:
+                return TURN_DONE
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
         return TURN_TOOL
     if content:
