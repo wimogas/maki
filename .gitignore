@@ -2,3 +2,4 @@
 /dev
 /build
 /*.egg-info
+/sessions

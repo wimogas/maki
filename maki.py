@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import secrets
 from openai import OpenAI
 
 
@@ -38,6 +39,11 @@ def _load_env_file():
 
         if key not in os.environ:
             os.environ[key] = value
+
+
+SESSION_HOME = os.path.expanduser(
+    os.environ.get("MAKI_HOME", "~/.maki")
+)
 
 
 client = None
@@ -356,6 +362,20 @@ def _run_model_turn_loop(messages):
             break
 
 
+def save_session(messages, session_id):
+    """Save the current session messages as a JSON file in the sessions directory."""
+
+    session_dir = os.path.join(SESSION_HOME, "sessions")
+    os.makedirs(session_dir, exist_ok=True)
+    filename = f"{session_id}.json"
+    filepath = os.path.join(session_dir, filename)
+
+    with open(filepath, "w") as f:
+        json.dump(messages, f, indent=2)
+
+    print(f"{GREEN}(session saved){RESET}")
+
+
 # Load the environment file at startup
 _load_env_file()
 
@@ -367,18 +387,21 @@ def main():
 
     _banner()
     messages = [{"role": "system", "content": SYSTEM}]
+    session_id = f"{secrets.token_hex(3)}"
 
     while True:
         print(f"{DIM}/exit (end session) {RESET}")
         user = input()
 
         if user == "/exit":
+            save_session(messages, session_id)
             break
+
         print()
         messages.append({"role": "user", "content": user})
         _run_model_turn_loop(messages)
 
-    print(f"{DIM}────────────────────────────\n{messages}\n────────────────────────────{RESET}")
+        save_session(messages, session_id)
 
 
 if __name__ == "__main__":
