@@ -281,6 +281,8 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
 ]
 
+YOLO = False
+
 
 def run_tool(name, args):
     fn = DISPATCH.get(name)
@@ -292,11 +294,11 @@ def run_tool(name, args):
         arg_preview = arg_preview[:117] + "..."
     print(f"{DIM}{arg_preview}{RESET}")
     print()
-    if name in ('edit_file', 'write_file', 'run_bash'):
+    if name in ('edit_file', 'write_file', 'run_bash') and not YOLO:
         message = f"run {name}? (y/n) "
         if not _confirm(message):
             print(f"{YELLOW}({name} was not executed){RESET}")
-            return None
+            return "Cancelled by user"
     try:
         result = fn(**args)
     except Exception as e:
@@ -417,12 +419,18 @@ _init_source()
 
 
 def main():
+    global YOLO
+
     _banner()
     messages = [{"role": "system", "content": SYSTEM}]
     session_id = _new_session_id()
     while True:
-        print(f"{DIM}/sessions (list sessions) · /session id (resume session) · /exit (end session) {RESET}")
+        print(f"{DIM}/yolo (no hitl) · /sessions (list sessions) · /session id (resume session) · /exit (end session) {RESET}")
         user = input()
+        if user == "/yolo":
+            YOLO = True
+            print(f"{RED}(yolo mode on){RESET}")
+            continue
         if user == "/sessions":
             _list_sessions()
             continue
