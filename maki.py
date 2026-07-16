@@ -425,11 +425,18 @@ def main():
     messages = [{"role": "system", "content": SYSTEM}]
     session_id = _new_session_id()
     while True:
-        print(f"{DIM}/yolo (no hitl) · /sessions (list sessions) · /session id (resume session) · /exit (end session) {RESET}")
+        print(f"{MAGENTA}(you){RESET}{DIM} /help (see commands){RESET}")
         user = input()
+        if user == "/help":
+            print(f"{GREEN}(commands){RESET}\n/yolo (no hitl)\n/yoloff (hitl)\n/sessions (list sessions)\n/session id (resume session)\n/exit (end session)")
+            continue
         if user == "/yolo":
             YOLO = True
-            print(f"{RED}(yolo mode on){RESET}")
+            print(f"{RED}(YOLO mode on){RESET}")
+            continue
+        if user == "/yoloff":
+            YOLO = False
+            print(f"{GREEN}(YOLO mode off){RESET}")
             continue
         if user == "/sessions":
             _list_sessions()
